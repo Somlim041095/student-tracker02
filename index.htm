@@ -1,0 +1,2144 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบติดตามงานนักเรียน - Firebase</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        
+        // Firebase configuration will be set here
+        window.firebaseConfig = null;
+        window.db = null;
+        window.firebaseApp = null;
+        
+        // Firebase functions
+        window.initFirebase = function(config) {
+            try {
+                window.firebaseApp = initializeApp(config);
+                window.db = getFirestore(window.firebaseApp);
+                window.firebaseInitialized = true;
+                console.log('Firebase initialized successfully');
+                return true;
+            } catch (error) {
+                console.error('Firebase initialization failed:', error);
+                return false;
+            }
+        };
+        
+        window.saveToFirestore = async function(collectionName, data) {
+            if (!window.db) throw new Error('Firebase not initialized');
+            const docRef = await addDoc(collection(window.db, collectionName), {
+                ...data,
+                createdAt: new Date(),
+                updatedAt: new Date()
+            });
+            return docRef.id;
+        };
+        
+        window.getFromFirestore = async function(collectionName, conditions = null) {
+            if (!window.db) throw new Error('Firebase not initialized');
+            let q = collection(window.db, collectionName);
+            
+            if (conditions) {
+                if (conditions.where) {
+                    q = query(q, where(conditions.where.field, conditions.where.operator, conditions.where.value));
+                }
+                if (conditions.orderBy) {
+                    q = query(q, orderBy(conditions.orderBy.field, conditions.orderBy.direction || 'asc'));
+                }
+            }
+            
+            const querySnapshot = await getDocs(q);
+            const results = [];
+            querySnapshot.forEach((doc) => {
+                results.push({ id: doc.id, ...doc.data() });
+            });
+            return results;
+        };
+        
+        window.updateFirestore = async function(collectionName, docId, data) {
+            if (!window.db) throw new Error('Firebase not initialized');
+            const docRef = doc(window.db, collectionName, docId);
+            await updateDoc(docRef, {
+                ...data,
+                updatedAt: new Date()
+            });
+        };
+        
+        window.deleteFromFirestore = async function(collectionName, docId) {
+            if (!window.db) throw new Error('Firebase not initialized');
+            await deleteDoc(doc(window.db, collectionName, docId));
+        };
+        
+        window.listenToFirestore = function(collectionName, callback, conditions = null) {
+            if (!window.db) throw new Error('Firebase not initialized');
+            let q = collection(window.db, collectionName);
+            
+            if (conditions) {
+                if (conditions.where) {
+                    q = query(q, where(conditions.where.field, conditions.where.operator, conditions.where.value));
+                }
+                if (conditions.orderBy) {
+                    q = query(q, orderBy(conditions.orderBy.field, conditions.orderBy.direction || 'asc'));
+                }
+            }
+            
+            return onSnapshot(q, (querySnapshot) => {
+                const results = [];
+                querySnapshot.forEach((doc) => {
+                    results.push({ id: doc.id, ...doc.data() });
+                });
+                callback(results);
+            });
+        };
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Sarabun', sans-serif; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-white shadow-lg">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <h1 class="text-2xl font-bold text-gray-800">🔥 ระบบติดตามงานนักเรียน - Firebase</h1>
+                <div class="flex items-center space-x-4">
+                    <!-- Firebase Status -->
+                    <div id="firebaseStatus" class="flex items-center space-x-2">
+                        <div id="connectionStatus" class="w-3 h-3 bg-red-500 rounded-full"></div>
+                        <span id="statusText" class="text-sm text-gray-600">ไม่ได้เชื่อมต่อ</span>
+                    </div>
+                    <button id="connectFirebaseBtn" class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm">
+                        🔥 เชื่อมต่อ Firebase
+                    </button>
+                    <button id="studentBtn" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                        👨‍🎓 นักเรียน
+                    </button>
+                    <button id="teacherBtn" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                        👩‍🏫 ครู
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Firebase Setup Modal -->
+    <div id="firebaseSetupModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <h3 class="text-xl font-bold text-gray-800">🔥 เชื่อมต่อ Firebase Firestore</h3>
+                        <p class="text-gray-600 mt-1">ตั้งค่าฐานข้อมูล Firebase สำหรับบันทึกข้อมูลแบบ Real-time</p>
+                    </div>
+                    <button onclick="closeFirebaseSetup()" class="text-gray-400 hover:text-gray-600 text-2xl">✕</button>
+                </div>
+
+                <div class="space-y-6">
+                    <!-- Quick Help Section -->
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                        <h4 class="text-lg font-bold text-yellow-800 mb-4">🆘 ลืมคัดลอก Firebase Config แล้ว?</h4>
+                        <div class="space-y-4">
+                            <div class="bg-white rounded p-4 border-l-4 border-yellow-400">
+                                <strong class="text-yellow-800">📍 วิธีหา Firebase Config ที่หายไป:</strong>
+                                <ol class="mt-2 ml-4 list-decimal text-sm space-y-2">
+                                    <li>ไปที่ <a href="https://console.firebase.google.com" target="_blank" class="text-blue-600 underline font-medium">console.firebase.google.com</a></li>
+                                    <li>เลือกโปรเจกต์ที่สร้างไว้แล้ว</li>
+                                    <li>คลิกไอคอน ⚙️ (Settings) ข้างๆ "Project Overview"</li>
+                                    <li>เลือก "Project settings"</li>
+                                    <li>เลื่อนลงไปหาส่วน "Your apps"</li>
+                                    <li>คลิกที่แอปที่สร้างไว้ (จะมีไอคอน &lt;/&gt;)</li>
+                                    <li>เลื่อนลงไปหาส่วน "SDK setup and configuration"</li>
+                                    <li>เลือก "Config" (ไม่ใช่ npm)</li>
+                                    <li>คัดลอกโค้ด firebaseConfig ทั้งหมด</li>
+                                </ol>
+                            </div>
+                            
+                            <div class="bg-blue-50 rounded p-4 border-l-4 border-blue-400">
+                                <strong class="text-blue-800">🔍 หาไม่เจอแอป? สร้างใหม่:</strong>
+                                <ol class="mt-2 ml-4 list-decimal text-sm space-y-1">
+                                    <li>ในหน้า Project settings</li>
+                                    <li>เลื่อนลงไปหาส่วน "Your apps"</li>
+                                    <li>คลิก "Add app" → เลือก "Web" (&lt;/&gt;)</li>
+                                    <li>ตั้งชื่อแอป เช่น "Student Tracker"</li>
+                                    <li>คลิก "Register app"</li>
+                                    <li>คัดลอก firebaseConfig ที่แสดงขึ้นมา</li>
+                                </ol>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 1: Create Firebase Project -->
+                    <div class="bg-orange-50 rounded-lg p-6">
+                        <h4 class="text-lg font-bold text-orange-800 mb-4">🚀 ขั้นตอนที่ 1: สร้าง Firebase Project (ถ้ายังไม่มี)</h4>
+                        <div class="space-y-4">
+                            <div class="bg-white rounded p-4 border-l-4 border-orange-400">
+                                <strong>1. ไปที่ Firebase Console:</strong>
+                                <ul class="mt-2 ml-4 list-disc text-sm">
+                                    <li>เปิด <a href="https://console.firebase.google.com" target="_blank" class="text-blue-600 underline">console.firebase.google.com</a></li>
+                                    <li>คลิก "Create a project" หรือ "เพิ่มโปรเจกต์"</li>
+                                    <li>ตั้งชื่อโปรเจกต์ เช่น "student-tracker"</li>
+                                    <li>ปิด Google Analytics (ไม่จำเป็น)</li>
+                                    <li>คลิก "Create project"</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="bg-white rounded p-4 border-l-4 border-blue-400">
+                                <strong>2. เพิ่ม Web App:</strong>
+                                <ul class="mt-2 ml-4 list-disc text-sm">
+                                    <li>ในหน้า Project Overview คลิก "Web" (&lt;/&gt;)</li>
+                                    <li>ตั้งชื่อแอป เช่น "Student Tracker Web"</li>
+                                    <li>ไม่ต้องเลือก Firebase Hosting</li>
+                                    <li>คลิก "Register app"</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="bg-white rounded p-4 border-l-4 border-green-400">
+                                <strong>3. คัดลอก Firebase Config:</strong>
+                                <div class="mt-2 text-sm">
+                                    <p>หลังจากสร้างแอปแล้ว จะเห็นโค้ดแบบนี้:</p>
+                                    <div class="bg-gray-900 text-green-400 p-3 rounded mt-2 text-xs font-mono">
+const firebaseConfig = {<br>
+&nbsp;&nbsp;apiKey: "AIza...",<br>
+&nbsp;&nbsp;authDomain: "your-project.firebaseapp.com",<br>
+&nbsp;&nbsp;projectId: "your-project",<br>
+&nbsp;&nbsp;storageBucket: "your-project.appspot.com",<br>
+&nbsp;&nbsp;messagingSenderId: "123456789",<br>
+&nbsp;&nbsp;appId: "1:123456789:web:abc123"<br>
+};
+                                    </div>
+                                    <p class="mt-2 text-orange-600">📋 คัดลอกส่วน firebaseConfig นี้ไว้</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Setup Firestore -->
+                    <div class="bg-blue-50 rounded-lg p-6">
+                        <h4 class="text-lg font-bold text-blue-800 mb-4">🗄️ ขั้นตอนที่ 2: ตั้งค่า Firestore Database</h4>
+                        <div class="space-y-4">
+                            <div class="bg-white rounded p-4 border-l-4 border-blue-400">
+                                <strong>1. สร้าง Firestore Database:</strong>
+                                <ul class="mt-2 ml-4 list-disc text-sm">
+                                    <li>ในเมนูซ้าย คลิก "Firestore Database"</li>
+                                    <li>คลิก "Create database"</li>
+                                    <li>เลือก "Start in test mode" (สำหรับทดสอบ)</li>
+                                    <li>เลือก location ใกล้ที่สุด เช่น "asia-southeast1"</li>
+                                    <li>คลิก "Done"</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="bg-white rounded p-4 border-l-4 border-yellow-400">
+                                <strong>2. ตั้งค่า Security Rules (สำคัญ!):</strong>
+                                <ul class="mt-2 ml-4 list-disc text-sm">
+                                    <li>ไปที่แท็บ "Rules"</li>
+                                    <li>แทนที่ rules ด้วยโค้ดนี้:</li>
+                                </ul>
+                                <div class="bg-gray-900 text-green-400 p-3 rounded mt-2 text-xs font-mono">
+rules_version = '2';<br>
+service cloud.firestore {<br>
+&nbsp;&nbsp;match /databases/{database}/documents {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;match /{document=**} {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;allow read, write: if true;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;}<br>
+}
+                                </div>
+                                <p class="mt-2 text-xs text-yellow-700">⚠️ นี่เป็น rules สำหรับทดสอบ สำหรับใช้งานจริงควรตั้งค่าความปลอดภัยเพิ่มเติม</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Connect to System -->
+                    <div class="bg-green-50 rounded-lg p-6">
+                        <h4 class="text-lg font-bold text-green-800 mb-4">🔗 ขั้นตอนที่ 3: เชื่อมต่อกับระบบ</h4>
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">📋 วาง Firebase Config ที่นี่:</label>
+                                <textarea id="firebaseConfigInput" 
+                                         class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent font-mono text-sm" 
+                                         rows="8"
+                                         placeholder='const firebaseConfig = {
+  apiKey: "AIza...",
+  authDomain: "your-project.firebaseapp.com",
+  projectId: "your-project",
+  storageBucket: "your-project.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abc123"
+};'></textarea>
+                                <p class="text-xs text-gray-500 mt-1">วางโค้ด firebaseConfig ที่คัดลอกจากขั้นตอนข้างบน</p>
+                            </div>
+                            
+                            <!-- Visual Guide -->
+                            <div class="bg-white rounded p-4 border border-gray-200">
+                                <h5 class="font-semibold text-gray-800 mb-3">🖼️ ภาพประกอบการหา Config:</h5>
+                                <div class="grid md:grid-cols-2 gap-4 text-sm">
+                                    <div class="space-y-2">
+                                        <div class="bg-gray-100 p-3 rounded">
+                                            <strong>1. ไปที่ Project Settings</strong><br>
+                                            <span class="text-gray-600">⚙️ → Project settings</span>
+                                        </div>
+                                        <div class="bg-gray-100 p-3 rounded">
+                                            <strong>2. หาส่วน "Your apps"</strong><br>
+                                            <span class="text-gray-600">เลื่อนลงไปด้านล่าง</span>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <div class="bg-gray-100 p-3 rounded">
+                                            <strong>3. คลิกที่แอป Web</strong><br>
+                                            <span class="text-gray-600">ไอคอน &lt;/&gt;</span>
+                                        </div>
+                                        <div class="bg-gray-100 p-3 rounded">
+                                            <strong>4. เลือก "Config"</strong><br>
+                                            <span class="text-gray-600">คัดลอกโค้ดทั้งหมด</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Demo Mode -->
+                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <div class="flex items-center mb-2">
+                            <input type="checkbox" id="demoMode" class="mr-2">
+                            <label for="demoMode" class="text-sm font-medium text-yellow-800">🧪 โหมดทดสอบ (ใช้ข้อมูลตัวอย่าง)</label>
+                        </div>
+                        <p class="text-xs text-yellow-700">เลือกตัวเลือกนี้เพื่อทดสอบระบบโดยไม่ต้องตั้งค่า Firebase</p>
+                    </div>
+
+                    <!-- Benefits -->
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h5 class="font-semibold text-blue-800 mb-3">🎉 ข้อดีของ Firebase Firestore:</h5>
+                        <div class="grid md:grid-cols-2 gap-4 text-sm text-blue-700">
+                            <div class="space-y-2">
+                                <div class="flex items-center">
+                                    <span class="mr-2">⚡</span>
+                                    <span><strong>Real-time:</strong> อัพเดททันที</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="mr-2">🆓</span>
+                                    <span><strong>ฟรี:</strong> 50,000 อ่าน/วัน</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="mr-2">🔒</span>
+                                    <span><strong>ปลอดภัย:</strong> มี Security Rules</span>
+                                </div>
+                            </div>
+                            <div class="space-y-2">
+                                <div class="flex items-center">
+                                    <span class="mr-2">📱</span>
+                                    <span><strong>Multi-platform:</strong> Web, Mobile</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="mr-2">☁️</span>
+                                    <span><strong>Cloud:</strong> เข้าถึงได้ทุกที่</span>
+                                </div>
+                                <div class="flex items-center">
+                                    <span class="mr-2">🔄</span>
+                                    <span><strong>Offline:</strong> ทำงานแบบ offline ได้</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex justify-end space-x-3">
+                        <button onclick="closeFirebaseSetup()" 
+                                class="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors">
+                            ยกเลิก
+                        </button>
+                        <button onclick="connectToFirebase()" 
+                                class="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors">
+                            🔥 เชื่อมต่อ Firebase
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Student Section -->
+    <div id="studentSection" class="container mx-auto px-6 py-8">
+        <div class="max-w-4xl mx-auto">
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <h2 class="text-xl font-semibold text-gray-800 mb-6">🔍 ค้นหาข้อมูลการส่งงาน</h2>
+                
+                <div class="grid md:grid-cols-3 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">รหัสนักเรียน</label>
+                        <input type="text" id="studentId" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="กรอกรหัสนักเรียน">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">ห้องเรียน</label>
+                        <select id="classSelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">เลือกห้องเรียน</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">วิชา</label>
+                        <select id="subjectSelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">เลือกวิชา</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button id="searchBtn" class="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                    🔍 ค้นหา
+                </button>
+
+                <!-- Search Results -->
+                <div id="searchResults" class="mt-8 hidden">
+                    <!-- Student Info Card -->
+                    <div id="studentInfo" class="bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl p-6 mb-6">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-16 h-16 bg-white bg-opacity-20 rounded-full flex items-center justify-center text-2xl">
+                                👨‍🎓
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold" id="studentName">ข้อมูลนักเรียน</h3>
+                                <p class="opacity-90" id="studentDetails">รหัส: - | ห้อง: - | วิชา: -</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Statistics Cards -->
+                    <div class="grid md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-white rounded-lg p-4 shadow-md border-l-4 border-green-500">
+                            <div class="flex items-center">
+                                <div class="text-green-500 text-2xl mr-3">✅</div>
+                                <div>
+                                    <p class="text-sm text-gray-600">ส่งแล้ว</p>
+                                    <p class="text-xl font-bold text-gray-800" id="submittedCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 shadow-md border-l-4 border-red-500">
+                            <div class="flex items-center">
+                                <div class="text-red-500 text-2xl mr-3">❌</div>
+                                <div>
+                                    <p class="text-sm text-gray-600">ยังไม่ส่ง</p>
+                                    <p class="text-xl font-bold text-gray-800" id="notSubmittedCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 shadow-md border-l-4 border-yellow-500">
+                            <div class="flex items-center">
+                                <div class="text-yellow-500 text-2xl mr-3">⏰</div>
+                                <div>
+                                    <p class="text-sm text-gray-600">เกินกำหนด</p>
+                                    <p class="text-xl font-bold text-gray-800" id="overdueCount">0</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 shadow-md border-l-4 border-blue-500">
+                            <div class="flex items-center">
+                                <div class="text-blue-500 text-2xl mr-3">📊</div>
+                                <div>
+                                    <p class="text-sm text-gray-600">เปอร์เซ็นต์</p>
+                                    <p class="text-xl font-bold text-gray-800" id="completionRate">0%</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">📋 รายละเอียดงาน</h3>
+                    
+                    <!-- Assignment Cards -->
+                    <div class="space-y-4" id="assignmentCards">
+                    </div>
+
+                    <!-- Traditional Table (Hidden by default) -->
+                    <div id="tableView" class="hidden">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-semibold text-gray-800">📋 ตารางสรุป</h3>
+                            <button id="toggleView" class="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors">
+                                📊 มุมมองการ์ด
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full bg-white border border-gray-200 rounded-lg">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">งาน</th>
+                                        <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">วิชา</th>
+                                        <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">กำหนดส่ง</th>
+                                        <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">สถานะ</th>
+                                        <th class="px-4 py-3 text-left text-sm font-medium text-gray-700">วันที่ส่ง</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="resultsTable">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Toggle View Button -->
+                    <div class="mt-6 text-center">
+                        <button id="toggleViewBtn" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            📊 มุมมองตาราง
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Teacher Section -->
+    <div id="teacherSection" class="container mx-auto px-6 py-8 hidden">
+        <div class="max-w-6xl mx-auto">
+            <!-- Firebase Status -->
+            <div id="firebaseStatusCard" class="bg-white rounded-xl shadow-lg p-6 mb-8 hidden">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-4 h-4 bg-orange-500 rounded-full animate-pulse"></div>
+                        <span class="text-orange-700 font-medium">🔥 เชื่อมต่อกับ Firebase Firestore</span>
+                        <span id="realTimeIndicator" class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">Real-time</span>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button onclick="syncWithFirebase()" class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm">
+                            🔄 ซิงค์ข้อมูล
+                        </button>
+                        <button onclick="exportFirebaseData()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm">
+                            📤 ส่งออกข้อมูล
+                        </button>
+                        <button onclick="clearAllFirebaseData()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm">
+                            🗑️ ล้างข้อมูล
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Class & Subject Management -->
+            <div class="bg-white rounded-xl shadow-lg p-8 mb-8">
+                <h2 class="text-xl font-semibold text-gray-800 mb-6">🏫 จัดการห้องเรียนและวิชา</h2>
+                
+                <div class="grid md:grid-cols-2 gap-8">
+                    <!-- Class Management -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">📚 จัดการห้องเรียน</h3>
+                        <div class="space-y-4">
+                            <div class="flex space-x-2">
+                                <input type="text" id="classNameInput" placeholder="ชื่อห้องเรียน (เช่น ม.6/1, ป.4/2, อนุบาล 1)" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <button onclick="addClass()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                                    ➕ เพิ่ม
+                                </button>
+                            </div>
+                            <div class="text-xs text-gray-500 mb-2">
+                                💡 ตัวอย่าง: ม.1/1, ม.2/3, ป.5/2, อนุบาล 1, ป.6 วิทย์-คณิต
+                            </div>
+                            <div id="classList" class="space-y-2 max-h-40 overflow-y-auto">
+                                <!-- Classes will be listed here -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Subject Management -->
+                    <div>
+                        <h3 class="text-lg font-medium text-gray-700 mb-4">📖 จัดการวิชา</h3>
+                        <div class="space-y-4">
+                            <div class="flex space-x-2">
+                                <input type="text" id="subjectName" placeholder="ชื่อวิชา" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                                <button onclick="addSubject()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+                                    ➕ เพิ่ม
+                                </button>
+                            </div>
+                            <div id="subjectList" class="space-y-2 max-h-40 overflow-y-auto">
+                                <!-- Subjects will be listed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Upload Section -->
+            <div class="bg-white rounded-xl shadow-lg p-8 mb-8">
+                <h2 class="text-xl font-semibold text-gray-800 mb-6">📤 อัพโหลดข้อมูลนักเรียน</h2>
+                
+                <!-- Class Selection for Upload -->
+                <div class="grid md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">เลือกห้องเรียนสำหรับนักเรียนที่จะอัพโหลด</label>
+                        <select id="uploadClassSelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">เลือกห้องเรียน</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">เลือกวิชาสำหรับนักเรียนที่จะอัพโหลด</label>
+                        <select id="uploadSubjectSelect" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            <option value="">เลือกวิชา</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+                    <input type="file" id="excelFile" accept=".xlsx,.xls" class="hidden">
+                    <button onclick="document.getElementById('excelFile').click()" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors">
+                        📁 เลือกไฟล์ Excel
+                    </button>
+                    <p class="text-gray-500 mt-2">รองรับไฟล์ .xlsx และ .xls</p>
+                    <p class="text-sm text-gray-400 mt-1">รูปแบบ: รหัสนักเรียน | ชื่อนักเรียน</p>
+                    <p class="text-xs text-blue-600 mt-2">💡 ห้องเรียนและวิชาจะถูกกำหนดตามที่เลือกข้างบน</p>
+                    <div id="firebaseConnected" class="mt-4 hidden">
+                        <div class="inline-flex items-center px-3 py-1 bg-orange-100 text-orange-800 rounded-full text-sm">
+                            <span class="mr-1">🔥</span>
+                            ข้อมูลจะถูกบันทึกใน Firebase อัตโนมัติ
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Assignment Management -->
+            <div class="bg-white rounded-xl shadow-lg p-8">
+                <h2 class="text-xl font-semibold text-gray-800 mb-6">📝 จัดการงาน</h2>
+                
+                <!-- Add Assignment Form -->
+                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">ชื่องาน</label>
+                        <input type="text" id="assignmentName" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" placeholder="ชื่องาน">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">วิชา</label>
+                        <select id="assignmentSubject" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            <option value="">เลือกวิชา</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">ห้องเรียน</label>
+                        <select id="assignmentClass" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            <option value="">เลือกห้องเรียน</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">กำหนดส่ง</label>
+                        <input type="date" id="dueDate" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                    </div>
+                </div>
+
+                <button id="addAssignmentBtn" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-medium mb-8">
+                    ➕ เพิ่มงาน
+                </button>
+
+                <!-- Assignments List -->
+                <div id="assignmentsList">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-lg font-semibold text-gray-800">📋 รายการงาน</h3>
+                        <div class="flex space-x-2">
+                            <select id="filterClass" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                                <option value="">ทุกห้องเรียน</option>
+                            </select>
+                            <select id="filterSubject" class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                                <option value="">ทุกวิชา</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="assignmentsContainer">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Assignment Detail Modal -->
+    <div id="assignmentModal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <!-- Modal Header -->
+                <div class="flex justify-between items-start mb-6">
+                    <div>
+                        <h3 class="text-xl font-bold text-gray-800" id="modalTitle">รายละเอียดงาน</h3>
+                        <p class="text-gray-600 mt-1" id="modalSubtitle">ข้อมูลเพิ่มเติม</p>
+                    </div>
+                    <button onclick="closeAssignmentModal()" class="text-gray-400 hover:text-gray-600 text-2xl">
+                        ✕
+                    </button>
+                </div>
+
+                <!-- Assignment Info -->
+                <div class="space-y-4 mb-6">
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <div class="grid md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">ชื่องาน</label>
+                                <p class="text-gray-900" id="modalAssignmentName">-</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">วิชา</label>
+                                <p class="text-gray-900" id="modalSubject">-</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">ห้องเรียน</label>
+                                <p class="text-gray-900" id="modalClass">-</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">กำหนดส่ง</label>
+                                <p class="text-gray-900" id="modalDueDate">-</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Status Card -->
+                    <div id="modalStatusCard" class="rounded-lg p-4">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h4 class="font-semibold text-lg mb-2" id="modalStatusTitle">สถานะการส่งงาน</h4>
+                                <div class="flex items-center space-x-4">
+                                    <span id="modalStatusBadge" class="px-3 py-1 rounded-full text-sm font-medium">-</span>
+                                    <span id="modalSubmissionDate" class="text-sm text-gray-600">-</span>
+                                </div>
+                            </div>
+                            <div class="text-4xl" id="modalStatusIcon">📝</div>
+                        </div>
+                    </div>
+
+                    <!-- Time Info -->
+                    <div class="bg-blue-50 rounded-lg p-4">
+                        <h4 class="font-semibold text-gray-800 mb-2">⏰ ข้อมูลเวลา</h4>
+                        <div id="modalTimeInfo" class="text-sm text-gray-700">
+                            <p id="modalDaysInfo">-</p>
+                            <p id="modalAdvice" class="mt-2 font-medium">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex justify-end space-x-3">
+                    <button onclick="closeAssignmentModal()" 
+                            class="px-6 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors">
+                        ปิด
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Firebase Integration Variables
+        let firebaseConnected = false;
+        let isDemoMode = false;
+        let realTimeListeners = [];
+
+        // Data storage
+        let students = [];
+        let assignments = [];
+        let submissions = {};
+        let classes = ['ม.6/1', 'ม.6/2']; // Available classes
+        let subjects = ['คณิตศาสตร์', 'ฟิสิกส์', 'เคมี', 'ชีววิทยา']; // Available subjects
+
+        // Sample data
+        const sampleStudents = [
+            { id: '65001', name: 'สมชาย ใจดี', class: 'ม.6/1', subject: 'คณิตศาสตร์' },
+            { id: '65002', name: 'สมหญิง รักเรียน', class: 'ม.6/1', subject: 'คณิตศาสตร์' },
+            { id: '65003', name: 'วิชัย เก่งมาก', class: 'ม.6/2', subject: 'ฟิสิกส์' },
+            { id: '65004', name: 'มาลี ขยันดี', class: 'ม.6/2', subject: 'ฟิสิกส์' }
+        ];
+
+        const sampleAssignments = [
+            { id: 1, name: 'การบ้านที่ 1', subject: 'คณิตศาสตร์', class: 'ม.6/1', dueDate: '2024-01-15' },
+            { id: 2, name: 'โครงงานฟิสิกส์', subject: 'ฟิสิกส์', class: 'ม.6/2', dueDate: '2024-01-20' }
+        ];
+
+        // Firebase Functions
+        function showFirebaseSetup() {
+            document.getElementById('firebaseSetupModal').classList.remove('hidden');
+        }
+
+        function closeFirebaseSetup() {
+            document.getElementById('firebaseSetupModal').classList.add('hidden');
+        }
+
+        async function connectToFirebase() {
+            const configInput = document.getElementById('firebaseConfigInput').value;
+            const demoMode = document.getElementById('demoMode').checked;
+            
+            if (demoMode) {
+                // Demo mode - simulate connection
+                isDemoMode = true;
+                firebaseConnected = true;
+                updateFirebaseStatus(true, 'โหมดทดสอบ');
+                document.getElementById('firebaseStatusCard').classList.remove('hidden');
+                document.getElementById('firebaseConnected').classList.remove('hidden');
+                closeFirebaseSetup();
+                showNotification('เชื่อมต่อโหมดทดสอบสำเร็จ! 🧪', 'success');
+                loadSampleData();
+                return;
+            }
+            
+            if (!configInput.trim()) {
+                showNotification('กรุณาวาง Firebase Config', 'error');
+                return;
+            }
+            
+            try {
+                // Extract config from input
+                const configMatch = configInput.match(/const\s+firebaseConfig\s*=\s*({[\s\S]*?});/);
+                if (!configMatch) {
+                    throw new Error('รูปแบบ Firebase Config ไม่ถูกต้อง');
+                }
+                
+                const configStr = configMatch[1];
+                const config = eval('(' + configStr + ')');
+                
+                // Validate required fields
+                const requiredFields = ['apiKey', 'authDomain', 'projectId'];
+                for (const field of requiredFields) {
+                    if (!config[field]) {
+                        throw new Error(`ไม่พบ ${field} ใน Firebase Config`);
+                    }
+                }
+                
+                // Initialize Firebase
+                const success = window.initFirebase(config);
+                if (success) {
+                    firebaseConnected = true;
+                    updateFirebaseStatus(true, 'เชื่อมต่อแล้ว');
+                    document.getElementById('firebaseStatusCard').classList.remove('hidden');
+                    document.getElementById('firebaseConnected').classList.remove('hidden');
+                    closeFirebaseSetup();
+                    
+                    // Load data from Firebase
+                    await loadDataFromFirebase();
+                    
+                    // Setup real-time listeners
+                    setupRealTimeListeners();
+                    
+                    showNotification('เชื่อมต่อ Firebase สำเร็จ! 🔥', 'success');
+                } else {
+                    throw new Error('ไม่สามารถเริ่มต้น Firebase ได้');
+                }
+                
+            } catch (error) {
+                console.error('Firebase connection failed:', error);
+                showNotification(`ไม่สามารถเชื่อมต่อได้: ${error.message}`, 'error');
+            }
+        }
+
+        function updateFirebaseStatus(connected, text) {
+            const statusDot = document.getElementById('connectionStatus');
+            const statusText = document.getElementById('statusText');
+            const connectBtn = document.getElementById('connectFirebaseBtn');
+            
+            if (connected) {
+                statusDot.className = 'w-3 h-3 bg-orange-500 rounded-full';
+                statusText.textContent = text;
+                connectBtn.textContent = '🔥 เชื่อมต่อแล้ว';
+                connectBtn.className = 'px-4 py-2 bg-orange-600 text-white rounded-lg cursor-default text-sm';
+            } else {
+                statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                statusText.textContent = 'ไม่ได้เชื่อมต่อ';
+                connectBtn.textContent = '🔥 เชื่อมต่อ Firebase';
+                connectBtn.className = 'px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors text-sm';
+            }
+        }
+
+        // Load sample data for demo mode
+        function loadSampleData() {
+            students = [...sampleStudents];
+            assignments = [...sampleAssignments];
+            submissions = {
+                '65001-1': { submitted: true, date: '2024-01-14' },
+                '65002-1': { submitted: false },
+                '65003-2': { submitted: true, date: '2024-01-18' },
+                '65004-2': { submitted: false }
+            };
+            
+            updateAllDropdowns();
+            renderClassList();
+            renderSubjectList();
+            updateAssignmentFilters();
+            renderAssignments();
+        }
+
+        // Load data from Firebase
+        async function loadDataFromFirebase() {
+            if (!firebaseConnected || isDemoMode) {
+                loadSampleData();
+                return;
+            }
+            
+            try {
+                showNotification('กำลังโหลดข้อมูลจาก Firebase...', 'info');
+                
+                // Load students
+                const firebaseStudents = await window.getFromFirestore('students');
+                students = firebaseStudents.length > 0 ? firebaseStudents : [...sampleStudents];
+                
+                // Load assignments
+                const firebaseAssignments = await window.getFromFirestore('assignments');
+                assignments = firebaseAssignments.length > 0 ? firebaseAssignments : [...sampleAssignments];
+                
+                // Load submissions
+                const firebaseSubmissions = await window.getFromFirestore('submissions');
+                submissions = {};
+                firebaseSubmissions.forEach(sub => {
+                    submissions[sub.key] = { submitted: sub.submitted, date: sub.date };
+                });
+                
+                // Load classes and subjects
+                const firebaseClasses = await window.getFromFirestore('classes');
+                const firebaseSubjects = await window.getFromFirestore('subjects');
+                
+                if (firebaseClasses.length > 0) {
+                    classes = firebaseClasses.map(c => c.name);
+                }
+                if (firebaseSubjects.length > 0) {
+                    subjects = firebaseSubjects.map(s => s.name);
+                }
+                
+                // If no data exists, save sample data
+                if (firebaseStudents.length === 0) {
+                    await saveStudentsToFirebase();
+                }
+                if (firebaseAssignments.length === 0) {
+                    await saveAssignmentsToFirebase();
+                }
+                
+                updateAllDropdowns();
+                renderClassList();
+                renderSubjectList();
+                updateAssignmentFilters();
+                renderAssignments();
+                
+                showNotification('โหลดข้อมูลจาก Firebase สำเร็จ! 📊', 'success');
+                
+            } catch (error) {
+                console.error('Failed to load data from Firebase:', error);
+                showNotification('ไม่สามารถโหลดข้อมูลได้ ใช้ข้อมูลตัวอย่าง', 'error');
+                loadSampleData();
+            }
+        }
+
+        // Setup real-time listeners
+        function setupRealTimeListeners() {
+            if (!firebaseConnected || isDemoMode) return;
+            
+            try {
+                // Listen to students changes
+                const studentsUnsubscribe = window.listenToFirestore('students', (data) => {
+                    students = data;
+                    updateAllDropdowns();
+                    console.log('Students updated via real-time listener');
+                });
+                realTimeListeners.push(studentsUnsubscribe);
+                
+                // Listen to assignments changes
+                const assignmentsUnsubscribe = window.listenToFirestore('assignments', (data) => {
+                    assignments = data;
+                    updateAssignmentFilters();
+                    renderAssignments();
+                    console.log('Assignments updated via real-time listener');
+                });
+                realTimeListeners.push(assignmentsUnsubscribe);
+                
+                // Listen to submissions changes
+                const submissionsUnsubscribe = window.listenToFirestore('submissions', (data) => {
+                    submissions = {};
+                    data.forEach(sub => {
+                        submissions[sub.key] = { submitted: sub.submitted, date: sub.date };
+                    });
+                    renderAssignments();
+                    console.log('Submissions updated via real-time listener');
+                });
+                realTimeListeners.push(submissionsUnsubscribe);
+                
+                console.log('Real-time listeners setup complete');
+                
+            } catch (error) {
+                console.error('Failed to setup real-time listeners:', error);
+            }
+        }
+
+        // Save functions to Firebase
+        async function saveStudentsToFirebase() {
+            if (!firebaseConnected || isDemoMode) return;
+            
+            try {
+                for (const student of students) {
+                    if (!student.firebaseId) {
+                        const docId = await window.saveToFirestore('students', student);
+                        student.firebaseId = docId;
+                    }
+                }
+                console.log('Students saved to Firebase');
+            } catch (error) {
+                console.error('Failed to save students:', error);
+            }
+        }
+
+        async function saveAssignmentsToFirebase() {
+            if (!firebaseConnected || isDemoMode) return;
+            
+            try {
+                for (const assignment of assignments) {
+                    if (!assignment.firebaseId) {
+                        const docId = await window.saveToFirestore('assignments', assignment);
+                        assignment.firebaseId = docId;
+                    }
+                }
+                console.log('Assignments saved to Firebase');
+            } catch (error) {
+                console.error('Failed to save assignments:', error);
+            }
+        }
+
+        async function saveSubmissionsToFirebase() {
+            if (!firebaseConnected || isDemoMode) return;
+            
+            try {
+                for (const [key, submission] of Object.entries(submissions)) {
+                    await window.saveToFirestore('submissions', {
+                        key: key,
+                        submitted: submission.submitted,
+                        date: submission.date || null
+                    });
+                }
+                console.log('Submissions saved to Firebase');
+            } catch (error) {
+                console.error('Failed to save submissions:', error);
+            }
+        }
+
+        // Sync with Firebase
+        async function syncWithFirebase() {
+            if (!firebaseConnected) {
+                showNotification('ไม่ได้เชื่อมต่อ Firebase', 'error');
+                return;
+            }
+            
+            if (isDemoMode) {
+                showNotification('ซิงค์ข้อมูลสำเร็จ (โหมดทดสอบ) 🔄', 'info');
+                return;
+            }
+            
+            try {
+                showNotification('กำลังซิงค์ข้อมูลกับ Firebase...', 'info');
+                
+                await saveStudentsToFirebase();
+                await saveAssignmentsToFirebase();
+                await saveSubmissionsToFirebase();
+                
+                showNotification('ซิงค์ข้อมูลกับ Firebase สำเร็จ! 🔄', 'success');
+            } catch (error) {
+                console.error('Sync failed:', error);
+                showNotification('ไม่สามารถซิงค์ข้อมูลได้', 'error');
+            }
+        }
+
+        // Export Firebase data
+        async function exportFirebaseData() {
+            try {
+                const data = {
+                    students,
+                    assignments,
+                    submissions,
+                    classes,
+                    subjects,
+                    exportDate: new Date().toISOString(),
+                    source: firebaseConnected ? (isDemoMode ? 'demo' : 'firebase') : 'local'
+                };
+                
+                const dataStr = JSON.stringify(data, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(dataBlob);
+                link.download = `firebase-student-data-${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                showNotification('ส่งออกข้อมูล Firebase สำเร็จ! 📤', 'success');
+            } catch (error) {
+                console.error('Export failed:', error);
+                showNotification('ไม่สามารถส่งออกข้อมูลได้', 'error');
+            }
+        }
+
+        // Clear all Firebase data
+        async function clearAllFirebaseData() {
+            if (!confirm('⚠️ คุณแน่ใจหรือไม่ที่จะลบข้อมูลทั้งหมดใน Firebase?\n\nข้อมูลที่จะถูกลบ:\n- ข้อมูลนักเรียนทั้งหมด\n- ข้อมูลงานทั้งหมด\n- ข้อมูลการส่งงานทั้งหมด\n\nการกระทำนี้ไม่สามารถยกเลิกได้!')) {
+                return;
+            }
+            
+            try {
+                if (firebaseConnected && !isDemoMode) {
+                    showNotification('กำลังลบข้อมูลใน Firebase...', 'info');
+                    
+                    // Delete all collections (in a real app, you'd need to implement batch delete)
+                    // For now, we'll just reset local data and let it sync
+                }
+                
+                // Reset to sample data
+                students = [...sampleStudents];
+                assignments = [...sampleAssignments];
+                submissions = {
+                    '65001-1': { submitted: true, date: '2024-01-14' },
+                    '65002-1': { submitted: false },
+                    '65003-2': { submitted: true, date: '2024-01-18' },
+                    '65004-2': { submitted: false }
+                };
+                classes = ['ม.6/1', 'ม.6/2'];
+                subjects = ['คณิตศาสตร์', 'ฟิสิกส์', 'เคมี', 'ชีววิทยา'];
+                
+                // Update UI
+                updateAllDropdowns();
+                renderClassList();
+                renderSubjectList();
+                updateAssignmentFilters();
+                renderAssignments();
+                
+                // Hide search results
+                document.getElementById('searchResults').classList.add('hidden');
+                
+                // Sync with Firebase
+                if (firebaseConnected && !isDemoMode) {
+                    await syncWithFirebase();
+                }
+                
+                showNotification('ล้างข้อมูลทั้งหมดแล้ว! กลับสู่ข้อมูลตัวอย่าง 🗑️', 'success');
+            } catch (error) {
+                console.error('Clear data failed:', error);
+                showNotification('ไม่สามารถล้างข้อมูลได้', 'error');
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-green-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+            
+            notification.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 transform transition-transform duration-300 translate-x-full`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            // Animate in
+            setTimeout(() => {
+                notification.classList.remove('translate-x-full');
+            }, 100);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                notification.classList.add('translate-x-full');
+                setTimeout(() => {
+                    if (document.body.contains(notification)) {
+                        document.body.removeChild(notification);
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        // Class and Subject Management Functions
+        async function addClass() {
+            const className = document.getElementById('classNameInput').value.trim();
+            
+            if (!className) {
+                showNotification('กรุณากรอกชื่อห้องเรียน', 'error');
+                return;
+            }
+            
+            if (classes.includes(className)) {
+                showNotification('ห้องเรียนนี้มีอยู่แล้ว', 'error');
+                return;
+            }
+            
+            classes.push(className);
+            
+            // Save to Firebase
+            if (firebaseConnected && !isDemoMode) {
+                try {
+                    await window.saveToFirestore('classes', { name: className });
+                } catch (error) {
+                    console.error('Failed to save class to Firebase:', error);
+                }
+            }
+            
+            // Clear form
+            document.getElementById('classNameInput').value = '';
+            
+            renderClassList();
+            updateAllDropdowns();
+            showNotification(`เพิ่มห้องเรียน ${className} สำเร็จ!`, 'success');
+        }
+
+        async function removeClass(className) {
+            const index = classes.indexOf(className);
+            if (index > -1) {
+                classes.splice(index, 1);
+                
+                renderClassList();
+                updateAllDropdowns();
+                showNotification(`ลบห้องเรียน ${className} สำเร็จ!`, 'success');
+            }
+        }
+
+        async function addSubject() {
+            const subjectName = document.getElementById('subjectName').value.trim();
+            
+            if (!subjectName) {
+                showNotification('กรุณากรอกชื่อวิชา', 'error');
+                return;
+            }
+            
+            if (subjects.includes(subjectName)) {
+                showNotification('วิชานี้มีอยู่แล้ว', 'error');
+                return;
+            }
+            
+            subjects.push(subjectName);
+            
+            // Save to Firebase
+            if (firebaseConnected && !isDemoMode) {
+                try {
+                    await window.saveToFirestore('subjects', { name: subjectName });
+                } catch (error) {
+                    console.error('Failed to save subject to Firebase:', error);
+                }
+            }
+            
+            // Clear form
+            document.getElementById('subjectName').value = '';
+            
+            renderSubjectList();
+            updateAllDropdowns();
+            showNotification(`เพิ่มวิชา ${subjectName} สำเร็จ!`, 'success');
+        }
+
+        async function removeSubject(subjectName) {
+            const index = subjects.indexOf(subjectName);
+            if (index > -1) {
+                subjects.splice(index, 1);
+                
+                renderSubjectList();
+                updateAllDropdowns();
+                showNotification(`ลบวิชา ${subjectName} สำเร็จ!`, 'success');
+            }
+        }
+
+        function renderClassList() {
+            const container = document.getElementById('classList');
+            container.innerHTML = '';
+            
+            if (classes.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-sm">ยังไม่มีห้องเรียน</p>';
+                return;
+            }
+            
+            classes.forEach(className => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center justify-between bg-blue-50 px-3 py-2 rounded border';
+                div.innerHTML = `
+                    <span class="text-blue-800 font-medium">${className}</span>
+                    <button onclick="removeClass('${className}')" 
+                            class="text-red-500 hover:text-red-700 text-sm">
+                        🗑️ ลบ
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function renderSubjectList() {
+            const container = document.getElementById('subjectList');
+            container.innerHTML = '';
+            
+            if (subjects.length === 0) {
+                container.innerHTML = '<p class="text-gray-500 text-sm">ยังไม่มีวิชา</p>';
+                return;
+            }
+            
+            subjects.forEach(subjectName => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center justify-between bg-green-50 px-3 py-2 rounded border';
+                div.innerHTML = `
+                    <span class="text-green-800 font-medium">${subjectName}</span>
+                    <button onclick="removeSubject('${subjectName}')" 
+                            class="text-red-500 hover:text-red-700 text-sm">
+                        🗑️ ลบ
+                    </button>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        // UI Elements
+        const studentBtn = document.getElementById('studentBtn');
+        const teacherBtn = document.getElementById('teacherBtn');
+        const studentSection = document.getElementById('studentSection');
+        const teacherSection = document.getElementById('teacherSection');
+        const connectFirebaseBtn = document.getElementById('connectFirebaseBtn');
+
+        // Navigation
+        studentBtn.addEventListener('click', () => {
+            studentSection.classList.remove('hidden');
+            teacherSection.classList.add('hidden');
+            studentBtn.classList.add('bg-blue-600');
+            studentBtn.classList.remove('bg-gray-400');
+            teacherBtn.classList.add('bg-gray-400');
+            teacherBtn.classList.remove('bg-green-600');
+        });
+
+        teacherBtn.addEventListener('click', () => {
+            teacherSection.classList.remove('hidden');
+            studentSection.classList.add('hidden');
+            teacherBtn.classList.add('bg-green-600');
+            teacherBtn.classList.remove('bg-gray-400');
+            studentBtn.classList.add('bg-gray-400');
+            studentBtn.classList.remove('bg-blue-600');
+            updateAllDropdowns();
+            renderClassList();
+            renderSubjectList();
+        });
+
+        // Connect to Firebase
+        connectFirebaseBtn.addEventListener('click', () => {
+            if (!firebaseConnected) {
+                showFirebaseSetup();
+            }
+        });
+
+        // Excel file upload
+        document.getElementById('excelFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const selectedClass = document.getElementById('uploadClassSelect').value;
+                const selectedSubject = document.getElementById('uploadSubjectSelect').value;
+                
+                if (!selectedClass || !selectedSubject) {
+                    showNotification('กรุณาเลือกห้องเรียนและวิชาก่อนอัพโหลดไฟล์', 'error');
+                    e.target.value = '';
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = async function(e) {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(firstSheet, {header: 1});
+                        
+                        // Process Excel data (skip header row)
+                        const newStudents = [];
+                        for (let i = 1; i < jsonData.length; i++) {
+                            const row = jsonData[i];
+                            if (row[0] && row[1]) { // Only need student ID and name
+                                // Check if student already exists
+                                const existingStudent = students.find(s => s.id === row[0].toString());
+                                if (!existingStudent) {
+                                    newStudents.push({
+                                        id: row[0].toString(),
+                                        name: row[1],
+                                        class: selectedClass,
+                                        subject: selectedSubject
+                                    });
+                                }
+                            }
+                        }
+                        
+                        if (newStudents.length === 0) {
+                            showNotification('ไม่พบข้อมูลนักเรียนใหม่ หรือนักเรียนทั้งหมดมีอยู่แล้ว', 'error');
+                            return;
+                        }
+                        
+                        students = [...students, ...newStudents];
+                        
+                        // Save to Firebase
+                        if (firebaseConnected && !isDemoMode) {
+                            try {
+                                for (const student of newStudents) {
+                                    await window.saveToFirestore('students', student);
+                                }
+                            } catch (error) {
+                                console.error('Failed to save students to Firebase:', error);
+                            }
+                        }
+                        
+                        showNotification(`อัพโหลดสำเร็จ! เพิ่มข้อมูลนักเรียน ${newStudents.length} คน ในห้อง ${selectedClass} วิชา ${selectedSubject}`, 'success');
+                        updateAllDropdowns();
+                        
+                        // Reset file input
+                        e.target.value = '';
+                    } catch (error) {
+                        showNotification('เกิดข้อผิดพลาดในการอ่านไฟล์ Excel', 'error');
+                        console.error(error);
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // Update all dropdowns
+        function updateAllDropdowns() {
+            updateDropdowns();
+            updateTeacherDropdowns();
+            updateUploadDropdowns();
+        }
+
+        // Update student search dropdowns
+        function updateDropdowns() {
+            const classSelect = document.getElementById('classSelect');
+            const subjectSelect = document.getElementById('subjectSelect');
+            
+            classSelect.innerHTML = '<option value="">เลือกห้องเรียน</option>';
+            subjectSelect.innerHTML = '<option value="">เลือกวิชา</option>';
+            
+            classes.forEach(cls => {
+                classSelect.innerHTML += `<option value="${cls}">${cls}</option>`;
+            });
+            
+            subjects.forEach(subj => {
+                subjectSelect.innerHTML += `<option value="${subj}">${subj}</option>`;
+            });
+        }
+
+        // Update teacher assignment dropdowns
+        function updateTeacherDropdowns() {
+            const assignmentSubject = document.getElementById('assignmentSubject');
+            const assignmentClass = document.getElementById('assignmentClass');
+            
+            assignmentSubject.innerHTML = '<option value="">เลือกวิชา</option>';
+            assignmentClass.innerHTML = '<option value="">เลือกห้องเรียน</option>';
+            
+            classes.forEach(cls => {
+                assignmentClass.innerHTML += `<option value="${cls}">${cls}</option>`;
+            });
+            
+            subjects.forEach(subj => {
+                assignmentSubject.innerHTML += `<option value="${subj}">${subj}</option>`;
+            });
+        }
+
+        // Update upload dropdowns
+        function updateUploadDropdowns() {
+            const uploadClassSelect = document.getElementById('uploadClassSelect');
+            const uploadSubjectSelect = document.getElementById('uploadSubjectSelect');
+            
+            uploadClassSelect.innerHTML = '<option value="">เลือกห้องเรียน</option>';
+            uploadSubjectSelect.innerHTML = '<option value="">เลือกวิชา</option>';
+            
+            classes.forEach(cls => {
+                uploadClassSelect.innerHTML += `<option value="${cls}">${cls}</option>`;
+            });
+            
+            subjects.forEach(subj => {
+                uploadSubjectSelect.innerHTML += `<option value="${subj}">${subj}</option>`;
+            });
+        }
+
+        // Search functionality
+        document.getElementById('searchBtn').addEventListener('click', () => {
+            const studentId = document.getElementById('studentId').value;
+            const selectedClass = document.getElementById('classSelect').value;
+            const selectedSubject = document.getElementById('subjectSelect').value;
+            
+            if (!studentId) {
+                showNotification('กรุณากรอกรหัสนักเรียน', 'error');
+                return;
+            }
+            
+            // Find student info
+            const student = students.find(s => s.id === studentId);
+            
+            let filteredAssignments = assignments;
+            
+            if (selectedClass) {
+                filteredAssignments = filteredAssignments.filter(a => a.class === selectedClass);
+            }
+            
+            if (selectedSubject) {
+                filteredAssignments = filteredAssignments.filter(a => a.subject === selectedSubject);
+            }
+            
+            // If student found, filter by their class and subject
+            if (student) {
+                if (!selectedClass) {
+                    filteredAssignments = filteredAssignments.filter(a => a.class === student.class);
+                }
+                if (!selectedSubject) {
+                    filteredAssignments = filteredAssignments.filter(a => a.subject === student.subject);
+                }
+            }
+            
+            // Update student info card
+            updateStudentInfo(student, studentId, selectedClass, selectedSubject);
+            
+            // Calculate statistics
+            const stats = calculateStatistics(studentId, filteredAssignments);
+            updateStatistics(stats);
+            
+            // Render assignment cards
+            renderAssignmentCards(studentId, filteredAssignments);
+            
+            // Render table
+            renderResultsTable(studentId, filteredAssignments);
+            
+            document.getElementById('searchResults').classList.remove('hidden');
+        });
+
+        // Update student info
+        function updateStudentInfo(student, studentId, selectedClass, selectedSubject) {
+            const studentName = document.getElementById('studentName');
+            const studentDetails = document.getElementById('studentDetails');
+            
+            if (student) {
+                studentName.textContent = student.name;
+                studentDetails.textContent = `รหัส: ${student.id} | ห้อง: ${student.class} | วิชา: ${student.subject}`;
+            } else {
+                studentName.textContent = `นักเรียนรหัส ${studentId}`;
+                studentDetails.textContent = `รหัส: ${studentId} | ห้อง: ${selectedClass || 'ทั้งหมด'} | วิชา: ${selectedSubject || 'ทั้งหมด'}`;
+            }
+        }
+
+        // Calculate statistics
+        function calculateStatistics(studentId, filteredAssignments) {
+            let submitted = 0;
+            let notSubmitted = 0;
+            let overdue = 0;
+            const today = new Date().toISOString().split('T')[0];
+            
+            filteredAssignments.forEach(assignment => {
+                const submissionKey = `${studentId}-${assignment.id}`;
+                const submission = submissions[submissionKey];
+                
+                if (submission && submission.submitted) {
+                    submitted++;
+                } else {
+                    notSubmitted++;
+                    if (assignment.dueDate < today) {
+                        overdue++;
+                    }
+                }
+            });
+            
+            const total = submitted + notSubmitted;
+            const completionRate = total > 0 ? Math.round((submitted / total) * 100) : 0;
+            
+            return { submitted, notSubmitted, overdue, completionRate };
+        }
+
+        // Update statistics display
+        function updateStatistics(stats) {
+            document.getElementById('submittedCount').textContent = stats.submitted;
+            document.getElementById('notSubmittedCount').textContent = stats.notSubmitted;
+            document.getElementById('overdueCount').textContent = stats.overdue;
+            document.getElementById('completionRate').textContent = stats.completionRate + '%';
+        }
+
+        // Render assignment cards
+        function renderAssignmentCards(studentId, filteredAssignments) {
+            const container = document.getElementById('assignmentCards');
+            container.innerHTML = '';
+            
+            if (filteredAssignments.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <div class="text-4xl mb-4">📝</div>
+                        <p>ไม่พบงานที่ตรงกับเงื่อนไขการค้นหา</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const today = new Date().toISOString().split('T')[0];
+            
+            filteredAssignments.forEach(assignment => {
+                const submissionKey = `${studentId}-${assignment.id}`;
+                const submission = submissions[submissionKey];
+                const isSubmitted = submission && submission.submitted;
+                const isOverdue = assignment.dueDate < today && !isSubmitted;
+                const daysUntilDue = Math.ceil((new Date(assignment.dueDate) - new Date(today)) / (1000 * 60 * 60 * 24));
+                
+                let statusClass = '';
+                let statusIcon = '';
+                let statusText = '';
+                let borderClass = '';
+                
+                if (isSubmitted) {
+                    statusClass = 'bg-green-100 text-green-800';
+                    statusIcon = '✅';
+                    statusText = 'ส่งแล้ว';
+                    borderClass = 'border-l-green-500';
+                } else if (isOverdue) {
+                    statusClass = 'bg-red-100 text-red-800';
+                    statusIcon = '⏰';
+                    statusText = 'เกินกำหนด';
+                    borderClass = 'border-l-red-500';
+                } else {
+                    statusClass = 'bg-yellow-100 text-yellow-800';
+                    statusIcon = '⏳';
+                    statusText = 'รอส่ง';
+                    borderClass = 'border-l-yellow-500';
+                }
+                
+                const card = document.createElement('div');
+                card.className = `bg-white rounded-lg shadow-md p-6 border-l-4 ${borderClass} hover:shadow-lg transition-shadow`;
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex-1">
+                            <h4 class="text-lg font-semibold text-gray-800 mb-2">${assignment.name}</h4>
+                            <div class="flex items-center space-x-4 text-sm text-gray-600 mb-3">
+                                <span class="flex items-center">
+                                    <span class="mr-1">📚</span>
+                                    ${assignment.subject}
+                                </span>
+                                <span class="flex items-center">
+                                    <span class="mr-1">🏫</span>
+                                    ${assignment.class}
+                                </span>
+                                <span class="flex items-center">
+                                    <span class="mr-1">📅</span>
+                                    ${assignment.dueDate}
+                                </span>
+                            </div>
+                            ${!isSubmitted && !isOverdue ? `
+                                <div class="text-sm text-gray-500">
+                                    ${daysUntilDue > 0 ? `เหลือเวลา ${daysUntilDue} วัน` : daysUntilDue === 0 ? 'ครบกำหนดวันนี้' : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="text-right">
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${statusClass}">
+                                <span class="mr-1">${statusIcon}</span>
+                                ${statusText}
+                            </span>
+                            ${isSubmitted && submission.date ? `
+                                <div class="text-xs text-gray-500 mt-2">
+                                    ส่งเมื่อ: ${submission.date}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    
+                    ${!isSubmitted ? `
+                        <div class="bg-gray-50 rounded-lg p-3">
+                            <div class="flex items-center text-sm text-gray-600">
+                                <span class="mr-2">💡</span>
+                                <span>แนะนำ: ${isOverdue ? 'ติดต่อครูเพื่อขอส่งงานเพิ่มเติม' : 'เตรียมส่งงานก่อนครบกำหนด'}</span>
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="bg-green-50 rounded-lg p-3">
+                            <div class="flex items-center text-sm text-green-700">
+                                <span class="mr-2">🎉</span>
+                                <span>เยี่ยม! ส่งงานเรียบร้อยแล้ว</span>
+                            </div>
+                        </div>
+                    `}
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        // Render results table
+        function renderResultsTable(studentId, filteredAssignments) {
+            const resultsTable = document.getElementById('resultsTable');
+            resultsTable.innerHTML = '';
+            
+            filteredAssignments.forEach(assignment => {
+                const submissionKey = `${studentId}-${assignment.id}`;
+                const submission = submissions[submissionKey];
+                const isSubmitted = submission && submission.submitted;
+                const submissionDate = isSubmitted && submission.date ? submission.date : '-';
+                
+                const status = isSubmitted ? 
+                    `<span class="px-2 py-1 bg-green-100 text-green-800 rounded-full text-sm">✅ ส่งแล้ว</span>` :
+                    `<span class="px-2 py-1 bg-red-100 text-red-800 rounded-full text-sm">❌ ยังไม่ส่ง</span>`;
+                
+                resultsTable.innerHTML += `
+                    <tr class="border-b border-gray-200 hover:bg-gray-50">
+                        <td class="px-4 py-3 font-medium">
+                            <button onclick="showAssignmentDetail(${assignment.id}, '${studentId}')" 
+                                    class="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer text-left">
+                                ${assignment.name}
+                            </button>
+                        </td>
+                        <td class="px-4 py-3">${assignment.subject}</td>
+                        <td class="px-4 py-3">${assignment.dueDate}</td>
+                        <td class="px-4 py-3">${status}</td>
+                        <td class="px-4 py-3 text-gray-600">${submissionDate}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // Toggle view functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggleViewBtn = document.getElementById('toggleViewBtn');
+            const assignmentCards = document.getElementById('assignmentCards');
+            const tableView = document.getElementById('tableView');
+            let isCardView = true;
+            
+            toggleViewBtn.addEventListener('click', () => {
+                if (isCardView) {
+                    assignmentCards.classList.add('hidden');
+                    tableView.classList.remove('hidden');
+                    toggleViewBtn.innerHTML = '📊 มุมมองการ์ด';
+                    isCardView = false;
+                } else {
+                    assignmentCards.classList.remove('hidden');
+                    tableView.classList.add('hidden');
+                    toggleViewBtn.innerHTML = '📊 มุมมองตาราง';
+                    isCardView = true;
+                }
+            });
+        });
+
+        // Add assignment
+        document.getElementById('addAssignmentBtn').addEventListener('click', async () => {
+            const name = document.getElementById('assignmentName').value;
+            const subject = document.getElementById('assignmentSubject').value;
+            const className = document.getElementById('assignmentClass').value;
+            const dueDate = document.getElementById('dueDate').value;
+            
+            if (name && subject && className && dueDate) {
+                const newAssignment = {
+                    id: assignments.length + 1,
+                    name,
+                    subject,
+                    class: className,
+                    dueDate
+                };
+                
+                assignments.push(newAssignment);
+                
+                // Save to Firebase
+                if (firebaseConnected && !isDemoMode) {
+                    try {
+                        const docId = await window.saveToFirestore('assignments', newAssignment);
+                        newAssignment.firebaseId = docId;
+                    } catch (error) {
+                        console.error('Failed to save assignment to Firebase:', error);
+                    }
+                }
+                
+                // Clear form
+                document.getElementById('assignmentName').value = '';
+                document.getElementById('assignmentSubject').value = '';
+                document.getElementById('assignmentClass').value = '';
+                document.getElementById('dueDate').value = '';
+                
+                updateAssignmentFilters();
+                renderAssignments();
+                showNotification('เพิ่มงานสำเร็จ!', 'success');
+            } else {
+                showNotification('กรุณากรอกข้อมูลให้ครบถ้วน', 'error');
+            }
+        });
+
+        // Render assignments with grouping
+        function renderAssignments() {
+            const container = document.getElementById('assignmentsContainer');
+            container.innerHTML = '';
+            
+            // Get filter values
+            const filterClass = document.getElementById('filterClass')?.value || '';
+            const filterSubject = document.getElementById('filterSubject')?.value || '';
+            
+            // Filter assignments
+            let filteredAssignments = assignments;
+            if (filterClass) {
+                filteredAssignments = filteredAssignments.filter(a => a.class === filterClass);
+            }
+            if (filterSubject) {
+                filteredAssignments = filteredAssignments.filter(a => a.subject === filterSubject);
+            }
+            
+            if (filteredAssignments.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-12 text-gray-500">
+                        <div class="text-4xl mb-4">📝</div>
+                        <p class="text-lg">ไม่พบงานที่ตรงกับเงื่อนไข</p>
+                        <p class="text-sm mt-2">ลองเปลี่ยนตัวกรองหรือเพิ่มงานใหม่</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Group assignments by class and subject
+            const groupedAssignments = {};
+            
+            filteredAssignments.forEach(assignment => {
+                const groupKey = `${assignment.class}-${assignment.subject}`;
+                if (!groupedAssignments[groupKey]) {
+                    groupedAssignments[groupKey] = {
+                        class: assignment.class,
+                        subject: assignment.subject,
+                        assignments: []
+                    };
+                }
+                groupedAssignments[groupKey].assignments.push(assignment);
+            });
+            
+            // Render each group
+            Object.values(groupedAssignments).forEach(group => {
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'mb-8 bg-white rounded-xl shadow-lg overflow-hidden';
+                
+                // Calculate group statistics
+                const totalAssignments = group.assignments.length;
+                const studentsInGroup = students.filter(s => s.class === group.class && s.subject === group.subject);
+                const totalStudents = studentsInGroup.length;
+                
+                let totalSubmissions = 0;
+                let totalPossible = 0;
+                
+                group.assignments.forEach(assignment => {
+                    studentsInGroup.forEach(student => {
+                        const submissionKey = `${student.id}-${assignment.id}`;
+                        const submission = submissions[submissionKey];
+                        if (submission && submission.submitted) {
+                            totalSubmissions++;
+                        }
+                        totalPossible++;
+                    });
+                });
+                
+                const completionRate = totalPossible > 0 ? Math.round((totalSubmissions / totalPossible) * 100) : 0;
+                
+                groupDiv.innerHTML = `
+                    <!-- Group Header -->
+                    <div class="bg-gradient-to-r from-blue-600 to-purple-600 text-white p-6">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="text-xl font-bold mb-2">🏫 ${group.class} - 📚 ${group.subject}</h3>
+                                <div class="flex items-center space-x-6 text-blue-100">
+                                    <span class="flex items-center">
+                                        <span class="mr-1">👥</span>
+                                        ${totalStudents} คน
+                                    </span>
+                                    <span class="flex items-center">
+                                        <span class="mr-1">📝</span>
+                                        ${totalAssignments} งาน
+                                    </span>
+                                    <span class="flex items-center">
+                                        <span class="mr-1">📊</span>
+                                        ${completionRate}% ส่งแล้ว
+                                    </span>
+                                    ${firebaseConnected ? `
+                                        <span class="flex items-center">
+                                            <span class="mr-1">🔥</span>
+                                            Firebase
+                                        </span>
+                                    ` : ''}
+                                </div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-bold">${completionRate}%</div>
+                                <div class="text-sm text-blue-200">อัตราส่งงาน</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Progress Bar -->
+                        <div class="mt-4">
+                            <div class="bg-blue-400 bg-opacity-30 rounded-full h-2">
+                                <div class="bg-white rounded-full h-2 transition-all duration-300" 
+                                     style="width: ${completionRate}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Assignments in Group -->
+                    <div class="p-6">
+                        <div class="space-y-6">
+                            ${group.assignments.map(assignment => {
+                                const studentsInClass = students.filter(s => s.class === assignment.class && s.subject === assignment.subject);
+                                const submittedCount = studentsInClass.filter(student => {
+                                    const submissionKey = `${student.id}-${assignment.id}`;
+                                    const submission = submissions[submissionKey];
+                                    return submission && submission.submitted;
+                                }).length;
+                                
+                                const assignmentCompletionRate = studentsInClass.length > 0 ? 
+                                    Math.round((submittedCount / studentsInClass.length) * 100) : 0;
+                                
+                                const today = new Date().toISOString().split('T')[0];
+                                const isOverdue = assignment.dueDate < today;
+                                const daysUntilDue = Math.ceil((new Date(assignment.dueDate) - new Date(today)) / (1000 * 60 * 60 * 24));
+                                
+                                let dueDateClass = '';
+                                let dueDateIcon = '';
+                                if (isOverdue) {
+                                    dueDateClass = 'text-red-600 bg-red-50';
+                                    dueDateIcon = '⚠️';
+                                } else if (daysUntilDue <= 3) {
+                                    dueDateClass = 'text-orange-600 bg-orange-50';
+                                    dueDateIcon = '🔥';
+                                } else {
+                                    dueDateClass = 'text-blue-600 bg-blue-50';
+                                    dueDateIcon = '📅';
+                                }
+                                
+                                return `
+                                    <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                        <!-- Assignment Header -->
+                                        <div class="bg-gray-50 px-4 py-3 border-b">
+                                            <div class="flex justify-between items-center">
+                                                <div class="flex-1">
+                                                    <h4 class="font-semibold text-gray-800 text-lg">${assignment.name}</h4>
+                                                    <div class="flex items-center space-x-4 mt-1">
+                                                        <span class="text-sm ${dueDateClass} px-2 py-1 rounded-full font-medium">
+                                                            ${dueDateIcon} ${assignment.dueDate}
+                                                            ${isOverdue ? ' (เกินกำหนด)' : daysUntilDue <= 3 ? ` (เหลือ ${daysUntilDue} วัน)` : ''}
+                                                        </span>
+                                                        <span class="text-sm text-gray-600">
+                                                            ส่งแล้ว: ${submittedCount}/${studentsInClass.length} คน
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div class="text-right ml-4">
+                                                    <div class="text-xl font-bold ${assignmentCompletionRate >= 80 ? 'text-green-600' : assignmentCompletionRate >= 50 ? 'text-yellow-600' : 'text-red-600'}">
+                                                        ${assignmentCompletionRate}%
+                                                    </div>
+                                                    ${firebaseConnected ? `
+                                                        <div class="text-xs text-orange-600 bg-orange-100 px-2 py-1 rounded mt-1">
+                                                            🔥 Firebase
+                                                        </div>
+                                                    ` : ''}
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Assignment Progress Bar -->
+                                            <div class="mt-3">
+                                                <div class="bg-gray-200 rounded-full h-2">
+                                                    <div class="rounded-full h-2 transition-all duration-300 ${
+                                                        assignmentCompletionRate >= 80 ? 'bg-green-500' : 
+                                                        assignmentCompletionRate >= 50 ? 'bg-yellow-500' : 'bg-red-500'
+                                                    }" style="width: ${assignmentCompletionRate}%"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Students List -->
+                                        <div class="p-4">
+                                            <div class="grid gap-2">
+                                                ${studentsInClass.map(student => {
+                                                    const submissionKey = `${student.id}-${assignment.id}`;
+                                                    const submission = submissions[submissionKey];
+                                                    const isSubmitted = submission && submission.submitted;
+                                                    
+                                                    return `
+                                                        <div class="flex items-center justify-between bg-gray-50 p-3 rounded-lg hover:bg-gray-100 transition-colors">
+                                                            <div class="flex items-center space-x-3">
+                                                                <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+                                                                    isSubmitted ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'
+                                                                }">
+                                                                    ${isSubmitted ? '✓' : student.id.slice(-2)}
+                                                                </div>
+                                                                <div>
+                                                                    <span class="font-medium text-gray-800">${student.name}</span>
+                                                                    <div class="text-sm text-gray-500">รหัส: ${student.id}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div class="flex items-center space-x-3">
+                                                                ${isSubmitted && submission.date ? `
+                                                                    <span class="text-xs text-gray-500">
+                                                                        ส่งเมื่อ: ${submission.date}
+                                                                    </span>
+                                                                ` : ''}
+                                                                <button onclick="toggleSubmission('${submissionKey}')" 
+                                                                        class="px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                                                                            isSubmitted ? 
+                                                                            'bg-green-100 text-green-800 hover:bg-green-200 border border-green-300' : 
+                                                                            'bg-red-100 text-red-800 hover:bg-red-200 border border-red-300'
+                                                                        }">
+                                                                    ${isSubmitted ? '✅ ส่งแล้ว' : '❌ ยังไม่ส่ง'}
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    `;
+                                                }).join('')}
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(groupDiv);
+            });
+        }
+        
+        // Update filter dropdowns for assignments
+        function updateAssignmentFilters() {
+            const filterClass = document.getElementById('filterClass');
+            const filterSubject = document.getElementById('filterSubject');
+            
+            if (!filterClass || !filterSubject) return;
+            
+            // Store current values
+            const currentClass = filterClass.value;
+            const currentSubject = filterSubject.value;
+            
+            // Update class filter
+            filterClass.innerHTML = '<option value="">ทุกห้องเรียน</option>';
+            const assignmentClasses = [...new Set(assignments.map(a => a.class))];
+            assignmentClasses.forEach(cls => {
+                filterClass.innerHTML += `<option value="${cls}" ${cls === currentClass ? 'selected' : ''}>${cls}</option>`;
+            });
+            
+            // Update subject filter
+            filterSubject.innerHTML = '<option value="">ทุกวิชา</option>';
+            const assignmentSubjects = [...new Set(assignments.map(a => a.subject))];
+            assignmentSubjects.forEach(subj => {
+                filterSubject.innerHTML += `<option value="${subj}" ${subj === currentSubject ? 'selected' : ''}>${subj}</option>`;
+            });
+            
+            // Add event listeners
+            filterClass.addEventListener('change', renderAssignments);
+            filterSubject.addEventListener('change', renderAssignments);
+        }
+
+        // Toggle submission status
+        async function toggleSubmission(submissionKey) {
+            if (!submissions[submissionKey]) {
+                submissions[submissionKey] = { submitted: false };
+            }
+            
+            submissions[submissionKey].submitted = !submissions[submissionKey].submitted;
+            
+            if (submissions[submissionKey].submitted) {
+                submissions[submissionKey].date = new Date().toISOString().split('T')[0];
+            }
+            
+            // Save to Firebase
+            if (firebaseConnected && !isDemoMode) {
+                try {
+                    await window.saveToFirestore('submissions', {
+                        key: submissionKey,
+                        submitted: submissions[submissionKey].submitted,
+                        date: submissions[submissionKey].date || null
+                    });
+                } catch (error) {
+                    console.error('Failed to save submission to Firebase:', error);
+                }
+            }
+            
+            renderAssignments();
+            showNotification('อัพเดทสถานะการส่งงานแล้ว', 'success');
+        }
+
+        // Show assignment detail modal
+        function showAssignmentDetail(assignmentId, studentId) {
+            const assignment = assignments.find(a => a.id === assignmentId);
+            const student = students.find(s => s.id === studentId);
+            const submissionKey = `${studentId}-${assignmentId}`;
+            const submission = submissions[submissionKey];
+            
+            if (!assignment) return;
+            
+            const today = new Date().toISOString().split('T')[0];
+            const isSubmitted = submission && submission.submitted;
+            const isOverdue = assignment.dueDate < today && !isSubmitted;
+            const daysUntilDue = Math.ceil((new Date(assignment.dueDate) - new Date(today)) / (1000 * 60 * 60 * 24));
+            
+            // Update modal content
+            document.getElementById('modalTitle').textContent = assignment.name;
+            document.getElementById('modalSubtitle').textContent = `รายละเอียดงาน - ${student ? student.name : `รหัส ${studentId}`}`;
+            
+            document.getElementById('modalAssignmentName').textContent = assignment.name;
+            document.getElementById('modalSubject').textContent = assignment.subject;
+            document.getElementById('modalClass').textContent = assignment.class;
+            document.getElementById('modalDueDate').textContent = assignment.dueDate;
+            
+            // Update status
+            const statusCard = document.getElementById('modalStatusCard');
+            const statusBadge = document.getElementById('modalStatusBadge');
+            const statusIcon = document.getElementById('modalStatusIcon');
+            const submissionDate = document.getElementById('modalSubmissionDate');
+            
+            if (isSubmitted) {
+                statusCard.className = 'rounded-lg p-4 bg-green-50 border border-green-200';
+                statusBadge.className = 'px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800';
+                statusBadge.textContent = '✅ ส่งแล้ว';
+                statusIcon.textContent = '🎉';
+                submissionDate.textContent = `ส่งเมื่อ: ${submission.date}`;
+            } else if (isOverdue) {
+                statusCard.className = 'rounded-lg p-4 bg-red-50 border border-red-200';
+                statusBadge.className = 'px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800';
+                statusBadge.textContent = '⏰ เกินกำหนด';
+                statusIcon.textContent = '😰';
+                submissionDate.textContent = 'ยังไม่ได้ส่ง';
+            } else {
+                statusCard.className = 'rounded-lg p-4 bg-yellow-50 border border-yellow-200';
+                statusBadge.className = 'px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800';
+                statusBadge.textContent = '⏳ รอส่ง';
+                statusIcon.textContent = '📝';
+                submissionDate.textContent = 'ยังไม่ได้ส่ง';
+            }
+            
+            // Update time info
+            const daysInfo = document.getElementById('modalDaysInfo');
+            const advice = document.getElementById('modalAdvice');
+            
+            if (isSubmitted) {
+                const submittedDays = Math.ceil((new Date(submission.date) - new Date(assignment.dueDate)) / (1000 * 60 * 60 * 24));
+                if (submittedDays <= 0) {
+                    daysInfo.textContent = `ส่งก่อนกำหนด ${Math.abs(submittedDays)} วัน`;
+                } else {
+                    daysInfo.textContent = `ส่งหลังกำหนด ${submittedDays} วัน`;
+                }
+                advice.textContent = '🎉 เยี่ยม! งานนี้ส่งเรียบร้อยแล้ว';
+                advice.className = 'mt-2 font-medium text-green-700';
+            } else if (isOverdue) {
+                const overdueDays = Math.abs(daysUntilDue);
+                daysInfo.textContent = `เกินกำหนดมาแล้ว ${overdueDays} วัน`;
+                advice.textContent = '⚠️ แนะนำ: ติดต่อครูเพื่อขอส่งงานเพิ่มเติม';
+                advice.className = 'mt-2 font-medium text-red-700';
+            } else {
+                if (daysUntilDue > 0) {
+                    daysInfo.textContent = `เหลือเวลาอีก ${daysUntilDue} วัน`;
+                    if (daysUntilDue <= 3) {
+                        advice.textContent = '🔥 เร่งด่วน! เตรียมส่งงานให้เร็วที่สุด';
+                        advice.className = 'mt-2 font-medium text-orange-700';
+                    } else {
+                        advice.textContent = '💡 แนะนำ: เตรียมงานให้เสร็จก่อนครบกำหนด';
+                        advice.className = 'mt-2 font-medium text-blue-700';
+                    }
+                } else if (daysUntilDue === 0) {
+                    daysInfo.textContent = 'ครบกำหนดวันนี้!';
+                    advice.textContent = '🚨 ด่วนมาก! ต้องส่งงานวันนี้';
+                    advice.className = 'mt-2 font-medium text-red-700';
+                }
+            }
+            
+            // Show modal
+            document.getElementById('assignmentModal').classList.remove('hidden');
+        }
+        
+        // Close assignment detail modal
+        function closeAssignmentModal() {
+            document.getElementById('assignmentModal').classList.add('hidden');
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('assignmentModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeAssignmentModal();
+            }
+        });
+
+        // Close Firebase setup modal when clicking outside
+        document.getElementById('firebaseSetupModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeFirebaseSetup();
+            }
+        });
+
+        // Initialize
+        loadSampleData();
+        updateAllDropdowns();
+        renderClassList();
+        renderSubjectList();
+        updateAssignmentFilters();
+        renderAssignments();
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'97b775b157ddee21',t:'MTc1NzI2MTI1My4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
