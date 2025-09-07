@@ -1,5 +1,29 @@
 <!DOCTYPE html>
 <html lang="th">
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyApXPu9_O_LuCrf7Dw30Ek-GSyVZ1Bwoo4",
+    authDomain: "student-tracker-web.firebaseapp.com",
+    projectId: "student-tracker-web",
+    storageBucket: "student-tracker-web.firebasestorage.app",
+    messagingSenderId: "249139563603",
+    appId: "1:249139563603:web:6174f9f538d34d84a2caa6",
+    measurementId: "G-9YTK5Z77TS"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+</script>
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
